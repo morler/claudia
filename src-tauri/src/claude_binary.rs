@@ -136,9 +136,10 @@ fn source_preference(installation: &ClaudeInstallation) -> u8 {
         "yarn" | "yarn-global" => 8,
         "bun" => 9,
         "node-modules" => 10,
-        "home-bin" => 11,
-        "PATH" => 12,
-        _ => 13,
+        "windows-dev-tools" => 11,
+        "home-bin" => 12,
+        "PATH" => 13,
+        _ => 14,
     }
 }
 
@@ -288,6 +289,7 @@ fn find_standard_installations() -> Vec<ClaudeInstallation> {
                 format!("C:\\Program Files (x86)\\Claude Code\\{}", binary_name),
                 "program-files-x86".to_string(),
             ),
+            // Common Windows development tool paths (multiple drives)
         ]
     } else {
         // Unix/Linux/macOS paths
@@ -411,6 +413,43 @@ fn find_standard_installations() -> Vec<ClaudeInstallation> {
                 source,
                 installation_type: InstallationType::System,
             });
+        }
+    }
+
+    // Windows-specific: Check common development drives and nodejs installations
+    #[cfg(target_os = "windows")]
+    {
+        let drives = ["C:", "D:", "E:", "F:"];
+        let dev_paths = [
+            "\\Dev\\nodejs\\claude",
+            "\\Dev\\nodejs\\claude.exe", 
+            "\\Dev\\nodejs\\claude.cmd",
+            "\\nodejs\\claude",
+            "\\nodejs\\claude.exe",
+            "\\nodejs\\claude.cmd",
+            "\\tools\\nodejs\\claude",
+            "\\tools\\nodejs\\claude.exe",
+            "\\tools\\nodejs\\claude.cmd",
+        ];
+        
+        for drive in &drives {
+            for dev_path in &dev_paths {
+                let full_path = format!("{}{}", drive, dev_path);
+                let path_buf = PathBuf::from(&full_path);
+                if path_buf.exists() && path_buf.is_file() {
+                    debug!("Found claude at Windows dev path: {}", full_path);
+                    
+                    // Get version
+                    let version = get_claude_version(&full_path).ok().flatten();
+                    
+                    installations.push(ClaudeInstallation {
+                        path: full_path,
+                        version,
+                        source: "windows-dev-tools".to_string(),
+                        installation_type: InstallationType::System,
+                    });
+                }
+            }
         }
     }
 
