@@ -47,7 +47,7 @@ pub fn find_claude_binary(app_handle: &tauri::AppHandle) -> Result<String, Strin
                     |row| row.get::<_, String>(0),
                 ) {
                     info!("Found stored claude path in database: {}", stored_path);
-                    
+
                     // Check if the path still exists
                     let path_buf = PathBuf::from(&stored_path);
                     if path_buf.exists() && path_buf.is_file() {
@@ -56,14 +56,14 @@ pub fn find_claude_binary(app_handle: &tauri::AppHandle) -> Result<String, Strin
                         warn!("Stored claude path no longer exists: {}", stored_path);
                     }
                 }
-                
+
                 // Check user preference
                 let preference = conn.query_row(
                     "SELECT value FROM app_settings WHERE key = 'claude_installation_preference'",
                     [],
                     |row| row.get::<_, String>(0),
                 ).unwrap_or_else(|_| "system".to_string());
-                
+
                 info!("User preference for Claude installation: {}", preference);
             }
         }
@@ -164,11 +164,17 @@ fn discover_system_installations() -> Vec<ClaudeInstallation> {
     installations
 }
 
-/// Try using the 'which' command to find Claude
+/// Try using the 'which' (Unix) or 'where' (Windows) command to find Claude
 fn try_which_command() -> Option<ClaudeInstallation> {
-    debug!("Trying 'which claude' to find binary...");
+    let (cmd, binary_name) = if cfg!(target_os = "windows") {
+        ("where", "claude.exe")
+    } else {
+        ("which", "claude")
+    };
 
-    match Command::new("which").arg("claude").output() {
+    debug!("Trying '{}' {} to find binary...", cmd, binary_name);
+
+    match Command::new(cmd).arg(binary_name).output() {
         Ok(output) if output.status.success() => {
             let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
@@ -212,7 +218,14 @@ fn try_which_command() -> Option<ClaudeInstallation> {
 fn find_nvm_installations() -> Vec<ClaudeInstallation> {
     let mut installations = Vec::new();
 
-    if let Ok(home) = std::env::var("HOME") {
+    // Get home directory based on OS
+    let home = if cfg!(target_os = "windows") {
+        std::env::var("USERPROFILE")
+    } else {
+        std::env::var("HOME")
+    };
+
+    if let Ok(home) = home {
         let nvm_dir = PathBuf::from(&home)
             .join(".nvm")
             .join("versions")
@@ -223,7 +236,12 @@ fn find_nvm_installations() -> Vec<ClaudeInstallation> {
         if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
             for entry in entries.flatten() {
                 if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    let claude_path = entry.path().join("bin").join("claude");
+                    let binary_name = if cfg!(target_os = "windows") {
+                        "claude.exe"
+                    } else {
+                        "claude"
+                    };
+                    let claude_path = entry.path().join("bin").join(binary_name);
 
                     if claude_path.exists() && claude_path.is_file() {
                         let path_str = claude_path.to_string_lossy().to_string();
@@ -252,46 +270,130 @@ fn find_nvm_installations() -> Vec<ClaudeInstallation> {
 /// Check standard installation paths
 fn find_standard_installations() -> Vec<ClaudeInstallation> {
     let mut installations = Vec::new();
+    let binary_name = if cfg!(target_os = "windows") {
+        "claude.exe"
+    } else {
+        "claude"
+    };
 
     // Common installation paths for claude
-    let mut paths_to_check: Vec<(String, String)> = vec![
-        ("/usr/local/bin/claude".to_string(), "system".to_string()),
-        (
-            "/opt/homebrew/bin/claude".to_string(),
-            "homebrew".to_string(),
-        ),
-        ("/usr/bin/claude".to_string(), "system".to_string()),
-        ("/bin/claude".to_string(), "system".to_string()),
-    ];
+    let mut paths_to_check: Vec<(String, String)> = if cfg!(target_os = "windows") {
+        // Windows-specific system paths
+        vec![
+            (
+                format!("C:\\Program Files\\Claude Code\\{}", binary_name),
+                "program-files".to_string(),
+            ),
+            (
+                format!("C:\\Program Files (x86)\\Claude Code\\{}", binary_name),
+                "program-files-x86".to_string(),
+            ),
+        ]
+    } else {
+        // Unix/Linux/macOS paths
+        vec![
+            (
+                format!("/usr/local/bin/{}", binary_name),
+                "system".to_string(),
+            ),
+            (
+                format!("/opt/homebrew/bin/{}", binary_name),
+                "homebrew".to_string(),
+            ),
+            (format!("/usr/bin/{}", binary_name), "system".to_string()),
+            (format!("/bin/{}", binary_name), "system".to_string()),
+        ]
+    };
+
+    // Get home directory based on OS
+    let home = if cfg!(target_os = "windows") {
+        std::env::var("USERPROFILE")
+    } else {
+        std::env::var("HOME")
+    };
 
     // Also check user-specific paths
-    if let Ok(home) = std::env::var("HOME") {
-        paths_to_check.extend(vec![
-            (
-                format!("{}/.claude/local/claude", home),
-                "claude-local".to_string(),
-            ),
-            (
-                format!("{}/.local/bin/claude", home),
-                "local-bin".to_string(),
-            ),
-            (
-                format!("{}/.npm-global/bin/claude", home),
-                "npm-global".to_string(),
-            ),
-            (format!("{}/.yarn/bin/claude", home), "yarn".to_string()),
-            (format!("{}/.bun/bin/claude", home), "bun".to_string()),
-            (format!("{}/bin/claude", home), "home-bin".to_string()),
-            // Check common node_modules locations
-            (
-                format!("{}/node_modules/.bin/claude", home),
-                "node-modules".to_string(),
-            ),
-            (
-                format!("{}/.config/yarn/global/node_modules/.bin/claude", home),
-                "yarn-global".to_string(),
-            ),
-        ]);
+    if let Ok(home) = home {
+        if cfg!(target_os = "windows") {
+            // Windows-specific user paths
+            paths_to_check.extend(vec![
+                (
+                    format!(r"{}\.claude\local\{}", home, binary_name),
+                    "claude-local".to_string(),
+                ),
+                (
+                    format!(r"{}\AppData\Roaming\npm\{}", home, binary_name),
+                    "npm-global".to_string(),
+                ),
+                (
+                    format!(
+                        r"{}\AppData\Local\Programs\Claude Code\{}",
+                        home, binary_name
+                    ),
+                    "local-programs".to_string(),
+                ),
+                (
+                    format!(r"{}\scoop\apps\claude\current\{}", home, binary_name),
+                    "scoop".to_string(),
+                ),
+                (
+                    format!(r"{}\chocolatey\bin\{}", home, binary_name),
+                    "chocolatey".to_string(),
+                ),
+                // Check common node_modules locations on Windows
+                (
+                    format!(r"{}\node_modules\.bin\{}", home, binary_name),
+                    "node-modules".to_string(),
+                ),
+                (
+                    format!(
+                        r"{}\AppData\Roaming\npm\node_modules\.bin\{}",
+                        home, binary_name
+                    ),
+                    "npm-modules".to_string(),
+                ),
+            ]);
+        } else {
+            // Unix/Linux/macOS user paths
+            paths_to_check.extend(vec![
+                (
+                    format!("{}/.claude/local/{}", home, binary_name),
+                    "claude-local".to_string(),
+                ),
+                (
+                    format!("{}/.local/bin/{}", home, binary_name),
+                    "local-bin".to_string(),
+                ),
+                (
+                    format!("{}/.npm-global/bin/{}", home, binary_name),
+                    "npm-global".to_string(),
+                ),
+                (
+                    format!("{}/.yarn/bin/{}", home, binary_name),
+                    "yarn".to_string(),
+                ),
+                (
+                    format!("{}/.bun/bin/{}", home, binary_name),
+                    "bun".to_string(),
+                ),
+                (
+                    format!("{}/bin/{}", home, binary_name),
+                    "home-bin".to_string(),
+                ),
+                // Check common node_modules locations
+                (
+                    format!("{}/node_modules/.bin/{}", home, binary_name),
+                    "node-modules".to_string(),
+                ),
+                (
+                    format!(
+                        "{}/.config/yarn/global/node_modules/.bin/{}",
+                        home, binary_name
+                    ),
+                    "yarn-global".to_string(),
+                ),
+            ]);
+        }
     }
 
     // Check each path
@@ -313,13 +415,18 @@ fn find_standard_installations() -> Vec<ClaudeInstallation> {
     }
 
     // Also check if claude is available in PATH (without full path)
-    if let Ok(output) = Command::new("claude").arg("--version").output() {
+    let path_binary = if cfg!(target_os = "windows") {
+        "claude.exe"
+    } else {
+        "claude"
+    };
+    if let Ok(output) = Command::new(path_binary).arg("--version").output() {
         if output.status.success() {
             debug!("claude is available in PATH");
             let version = extract_version_from_output(&output.stdout);
 
             installations.push(ClaudeInstallation {
-                path: "claude".to_string(),
+                path: path_binary.to_string(),
                 version,
                 source: "PATH".to_string(),
                 installation_type: InstallationType::System,
@@ -350,10 +457,10 @@ fn get_claude_version(path: &str) -> Result<Option<String>, String> {
 /// Extract version string from command output
 fn extract_version_from_output(stdout: &[u8]) -> Option<String> {
     let output_str = String::from_utf8_lossy(stdout);
-    
+
     // Debug log the raw output
     debug!("Raw version output: {:?}", output_str);
-    
+
     // Use regex to directly extract version pattern (e.g., "1.0.41")
     // This pattern matches:
     // - One or more digits, followed by
@@ -362,8 +469,9 @@ fn extract_version_from_output(stdout: &[u8]) -> Option<String> {
     // - A dot, followed by
     // - One or more digits
     // - Optionally followed by pre-release/build metadata
-    let version_regex = regex::Regex::new(r"(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)").ok()?;
-    
+    let version_regex =
+        regex::Regex::new(r"(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)").ok()?;
+
     if let Some(captures) = version_regex.captures(&output_str) {
         if let Some(version_match) = captures.get(1) {
             let version = version_match.as_str().to_string();
@@ -371,7 +479,7 @@ fn extract_version_from_output(stdout: &[u8]) -> Option<String> {
             return Some(version);
         }
     }
-    
+
     debug!("No version found in output");
     None
 }
@@ -451,7 +559,7 @@ fn compare_versions(a: &str, b: &str) -> Ordering {
 /// This ensures commands like Claude can find Node.js and other dependencies
 pub fn create_command_with_env(program: &str) -> Command {
     let mut cmd = Command::new(program);
-    
+
     info!("Creating command for: {}", program);
 
     // Inherit essential environment variables from parent process
@@ -479,7 +587,7 @@ pub fn create_command_with_env(program: &str) -> Command {
             cmd.env(&key, &value);
         }
     }
-    
+
     // Log proxy-related environment variables for debugging
     info!("Command will use proxy settings:");
     if let Ok(http_proxy) = std::env::var("HTTP_PROXY") {
@@ -502,7 +610,7 @@ pub fn create_command_with_env(program: &str) -> Command {
             }
         }
     }
-    
+
     // Add Homebrew support if the program is in a Homebrew directory
     if program.contains("/homebrew/") || program.contains("/opt/homebrew/") {
         if let Some(program_dir) = std::path::Path::new(program).parent() {
@@ -511,7 +619,10 @@ pub fn create_command_with_env(program: &str) -> Command {
             let homebrew_bin_str = program_dir.to_string_lossy();
             if !current_path.contains(&homebrew_bin_str.as_ref()) {
                 let new_path = format!("{}:{}", homebrew_bin_str, current_path);
-                debug!("Adding Homebrew bin directory to PATH: {}", homebrew_bin_str);
+                debug!(
+                    "Adding Homebrew bin directory to PATH: {}",
+                    homebrew_bin_str
+                );
                 cmd.env("PATH", new_path);
             }
         }
