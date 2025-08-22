@@ -51,6 +51,10 @@
         "exists"
       ]
     },
+    "os": {
+      "all": false,
+      "platform": true
+    },
     "shell": {
       "open": true
     }

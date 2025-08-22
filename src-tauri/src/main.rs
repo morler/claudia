@@ -57,6 +57,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Initialize agents database
@@ -179,6 +180,17 @@ fn main() {
                     )
                     .expect("Failed to apply any window vibrancy");
                 }
+            }
+
+            // Apply Windows native styling
+            #[cfg(target_os = "windows")]
+            {
+                let window = app.get_webview_window("main").unwrap();
+
+                // Set window to use native decorations (title bar, borders)
+                window.set_decorations(true).expect("Failed to enable window decorations");
+                
+                log::info!("Applied Windows native styling with decorations");
             }
 
             Ok(())

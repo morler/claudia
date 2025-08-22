@@ -339,10 +339,47 @@ button:focus-visible,
   box-shadow: none !important;
 }
 
+/* Platform-specific styles */
+
 /* macOS-only: subtle window outline for transparent, custom-decorated window */
-html.is-macos body {
+html.platform-macos body {
   /* Maintain rounded-corner shape and add a gentle 1px inner outline */
   box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+/* Windows-specific styles: native appearance with square corners */
+html.platform-windows,
+html.platform-windows body,
+html.platform-windows #root {
+  /* Remove rounded corners for Windows native look */
+  border-radius: 0 !important;
+  clip-path: none !important;
+}
+
+html.platform-windows body {
+  /* Remove transparent background and use solid color */
+  background-color: var(--color-background) !important;
+  /* Remove box shadow for native Windows appearance */
+  box-shadow: none !important;
+}
+
+html.platform-windows {
+  /* Remove transparent background */
+  background-color: var(--color-background) !important;
+  /* Enable Windows native window controls */
+  overflow: visible !important;
+}
+
+/* Windows specific color scheme adjustments */
+html.platform-windows {
+  color-scheme: dark;
+}
+
+/* Linux-specific styles: keep current styling as baseline */
+html.platform-linux,
+html.platform-linux body {
+  /* Linux uses rounded corners like macOS but without transparency effects */
+  border-radius: var(--radius-lg);
 }
 
 /* Typography Utility Classes */
